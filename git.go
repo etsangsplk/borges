@@ -30,6 +30,7 @@ type TemporaryRepository interface {
 	io.Closer
 	Referencer
 	Push(url string, refspecs []config.RefSpec) error
+	StoreConfig(mr *model.Repository) error
 }
 
 type TemporaryCloner interface {
@@ -203,6 +204,39 @@ func (r *temporaryRepository) Push(url string, refspecs []config.RefSpec) error 
 	}
 
 	return remote.Push(&git.PushOptions{RefSpecs: refspecs})
+}
+
+func (r *temporaryRepository) StoreConfig(mr *model.Repository) error {
+	id := mr.ID.String()
+	storer := r.Repository.Storer
+	c, err := storer.Config()
+	if err != nil {
+		return err
+	}
+
+	remotes := c.Remotes
+	//FIXME: Use all endpoints once we get https://github.com/src-d/go-git/pull/501
+	endpoint, err := selectEndpoint(mr.Endpoints)
+	if err != nil {
+		return err
+	}
+
+	remote, ok := remotes[id]
+	if ok {
+		if remote.URL == endpoint {
+			return nil
+		}
+
+		remote.URL = endpoint
+		return storer.SetConfig(c)
+	}
+
+	c.Remotes[id] = &config.RemoteConfig{
+		Name: id,
+		URL:  endpoint,
+	}
+
+	return storer.SetConfig(c)
 }
 
 func (r *temporaryRepository) Close() error {
